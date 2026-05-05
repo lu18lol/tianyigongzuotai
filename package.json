@@ -1,0 +1,40 @@
+{
+  "name": "crm-automation",
+  "version": "1.0.0",
+  "description": "医美私域CRM自动化脚本 - 飞书多维表格方案",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.js",
+    "dev": "node --watch src/main.js",
+    "test": "node src/test.js",
+    "cron": "node src/scripts/cron-runner.js",
+    "seed": "node src/scripts/seed-demo.js",
+    "dashboard": "node src/scripts/dashboard.js",
+    "dashboard:send": "node src/scripts/dashboard.js --send",
+    "remind": "node src/scripts/target-reminder.js",
+    "morning": "node src/scripts/morning-briefing.js",
+    "afternoon": "node src/scripts/afternoon-reminder.js",
+    "nag": "node src/scripts/daily-report-nag.js",
+    "weekly": "node src/scripts/weekly-summary.js",
+    "push-daily-form": "node src/scripts/push-daily-form.js",
+    "setup-schema": "node src/scripts/schema-setup.js"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.0.0",
+    "axios": "^1.6.8",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "pino": "^9.0.0",
+    "pino-pretty": "^11.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "",
+  "license": "ISC"
+}

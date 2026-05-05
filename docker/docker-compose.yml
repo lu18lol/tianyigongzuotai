@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  crm-automation:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: crm-automation
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - LARK_APP_ID=${LARK_APP_ID}
+      - LARK_APP_SECRET=${LARK_APP_SECRET}
+      - BASE_TOKEN=${BASE_TOKEN}
+      - CUSTOMER_TABLE_ID=${CUSTOMER_TABLE_ID}
+      - ORDER_TABLE_ID=${ORDER_TABLE_ID}
+      - PRODUCT_TABLE_ID=${PRODUCT_TABLE_ID}
+      - SKU_TABLE_ID=${SKU_TABLE_ID}
+      - TASK_TABLE_ID=${TASK_TABLE_ID}
+      - TRANSFER_LOG_TABLE_ID=${TRANSFER_LOG_TABLE_ID}
+      - DAILY_REPORT_TABLE_ID=${DAILY_REPORT_TABLE_ID}
+      - TARGET_TABLE_ID=${TARGET_TABLE_ID}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      - ADMIN_USER_ID=${ADMIN_USER_ID}
+      - CRON_SCHEDULE=${CRON_SCHEDULE:-0 9 * * *}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ./logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - crm-network
+
+networks:
+  crm-network:
+    driver: bridge

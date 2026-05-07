@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><title>登录诊断</title></head>
+<body style="font-family: monospace; padding: 20px;">
+<h2>登录诊断</h2>
+<div id="log" style="background:#1a1a2e;color:#0f0;padding:16px;border-radius:8px;white-space:pre;font-size:13px;max-height:500px;overflow:auto;"></div>
+<button onclick="testLogin()" style="margin-top:12px;padding:8px 24px;font-size:16px;">测试登录</button>
+<button onclick="clearLog()" style="margin:12px;padding:8px 24px;">清空日志</button>
+<script>
+function log(msg) { document.getElementById('log').textContent += msg + '\n'; }
+function clearLog() { document.getElementById('log').textContent = ''; }
+
+async function testLogin() {
+  log('=== 开始诊断 ===');
+  log('1. 测试 API 连接...');
+  try {
+    const r = await fetch('/api/auth/dev-login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name:'系统管理员',password:'123456'})
+    });
+    log(`   Status: ${r.status} ${r.statusText}`);
+    const d = await r.json();
+    log(`   Success: ${d.success}`);
+    if (d.success) {
+      log(`   User: ${d.data.user.name} (${d.data.user.role})`);
+      log(`   Token: ${d.data.accessToken.substring(0,20)}...`);
+
+      localStorage.setItem('access_token', d.data.accessToken);
+      localStorage.setItem('refresh_token', d.data.refreshToken);
+      log('2. Token 已存储到 localStorage');
+
+      const me = await fetch('/api/common/me', {
+        headers: {'Authorization': 'Bearer ' + d.data.accessToken}
+      });
+      const meData = await me.json();
+      log(`3. getMe: ${meData.success ? 'OK - ' + meData.data.name : 'FAILED'}`);
+
+      if (meData.success) {
+        log('\n✅ 诊断通过！登录流程完全正常。');
+        log('请刷新主页面 http://localhost:5174/ 并清除 localStorage 后重试。');
+        log('清除方法: F12 → Application → Local Storage → 删除 access_token 和 refresh_token');
+      }
+    } else {
+      log(`❌ 登录失败: ${d.error?.message || '未知错误'}`);
+    }
+  } catch(e) {
+    log(`❌ 网络错误: ${e.message}`);
+  }
+}
+log('点击"测试登录"按钮开始...');
+</script>
+</body>
+</html>

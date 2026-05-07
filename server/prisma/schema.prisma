@@ -1,0 +1,475 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  boss
+  sales
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum PregnancyStatus {
+  not_pregnant
+  pregnant_1_3
+  pregnant_4_6
+  pregnant_7_9
+  lactating
+}
+
+enum IncomeLevel {
+  range_0_3000      @map("0_3000")
+  range_3000_8000   @map("3000_8000")
+  range_8000_12000  @map("8000_12000")
+  range_12000_20000 @map("12000_20000")
+  range_20000_50000 @map("20000_50000")
+  range_50000_plus  @map("50000+")
+}
+
+enum SourceChannel {
+  douyin
+  video_account
+  xiaohongshu
+  referral
+  private
+}
+
+enum CustomerStatus {
+  new
+  contacted
+  dealt
+  repurchase
+  silent_old
+  lost
+}
+
+enum ProductStatus {
+  on_sale
+  off_sale
+}
+
+enum ProductCategory {
+  water_glow     @map("水光")
+  repair         @map("修护")
+  acne           @map("祛痘")
+  firming        @map("紧致")
+  sunscreen      @map("防晒")
+  cleansing      @map("清洁")
+}
+
+enum OperationMode {
+  single
+  multi
+}
+
+enum CustomerType {
+  new
+  old
+}
+
+enum PaymentMethod {
+  wechat
+  yankong_qrcode
+  prepaid
+}
+
+enum OperationStatus {
+  pending
+  completed
+}
+
+enum TaskGenStatus {
+  pending
+  generated
+}
+
+enum FollowupStatus {
+  pending
+  completed
+  overdue
+  cancelled
+}
+
+enum TaskNode {
+  day1
+  day2
+  day3
+  day7
+  day15
+  day30
+}
+
+enum FollowupMethod {
+  wechat_text
+  wechat_voice
+  phone
+}
+
+enum CustomerIntent {
+  interested
+  not_considering
+  dealt
+  complaint
+}
+
+enum Rating {
+  good
+  not_good
+  refused
+}
+
+enum TargetType {
+  revenue
+  contact
+}
+
+enum PeriodType {
+  week
+  day
+}
+
+enum PrepaidType {
+  charge
+  deduct
+}
+
+enum PrepaidPaymentMethod {
+  wechat
+  yankong_qrcode
+  prepaid
+}
+
+enum TransferReason {
+  resign
+  reassign
+  customer_request
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id            Int        @id @default(autoincrement())
+  name          String     @db.VarChar(100)
+  phone         String?    @db.VarChar(20)
+  lark_open_id  String?    @unique @db.VarChar(50)
+  role          Role       @default(sales)
+  status        UserStatus @default(active)
+  lark_record_id String?   @db.VarChar(50)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  customers        Customer[]
+  orders           Order[]
+  followup_tasks   FollowupTask[]
+  daily_reports    DailyReport[]
+  targets          Target[]
+  prepaid_records  PrepaidRecord[]
+  operation_records OperationRecord[]
+  from_transfers   TransferLog[] @relation("FromOwner")
+  to_transfers     TransferLog[] @relation("ToOwner")
+  transfer_ops     TransferLog[] @relation("Operator")
+
+  @@map("users")
+}
+
+model Customer {
+  id                Int              @id @default(autoincrement())
+  customer_no       String?          @db.VarChar(20)
+  name              String           @db.VarChar(100)
+  phone             String?          @unique @db.VarChar(20)
+  wechat_name       String?          @db.VarChar(100)
+  wechat_id         String?          @db.VarChar(100)
+  address           String?          @db.Text
+  job               String?          @db.VarChar(100)
+  skin_sensitivity  Json?
+  allergy_notes     String?          @db.Text
+  pregnancy_status  PregnancyStatus  @default(not_pregnant)
+  health_conditions Json?
+  income_level      IncomeLevel?
+  source            SourceChannel?
+  intention_tags    Json?
+  status            CustomerStatus   @default(new)
+  first_order_date  DateTime?
+  last_order_date   DateTime?
+  purchase_category_tags Json?
+  repurchase_count  Int              @default(0)
+  total_recharge    Decimal          @default(0) @db.Decimal(10, 2)
+  total_deduct      Decimal          @default(0) @db.Decimal(10, 2)
+  current_balance   Decimal          @default(0) @db.Decimal(10, 2)
+  lark_record_id    String?          @db.VarChar(50)
+
+  owner_id Int
+  owner    User @relation(fields: [owner_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  orders            Order[]
+  followup_tasks    FollowupTask[]
+  prepaid_records   PrepaidRecord[]
+  operation_records OperationRecord[]
+  transfer_logs     TransferLog[]
+
+  @@index([owner_id])
+  @@index([status])
+  @@map("customers")
+}
+
+model Product {
+  id              Int             @id @default(autoincrement())
+  code            String?         @db.VarChar(50)
+  series          String?         @db.VarChar(100)
+  category        ProductCategory?
+  name            String          @unique @db.VarChar(200)
+  inventory_name  String?         @db.VarChar(200)
+  spec            String?         @db.VarChar(100)
+  effect          String?         @db.Text
+  price           Decimal         @default(0) @db.Decimal(10, 2)
+  cost            Decimal         @default(0) @db.Decimal(10, 2)
+  status          ProductStatus   @default(on_sale)
+  operation_mode  OperationMode   @default(single)
+  operation_count Int             @default(1)
+  lark_record_id  String?         @db.VarChar(50)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  order_items       OrderItem[]
+  followup_tasks    FollowupTask[]
+  product_knowledge ProductKnowledge?
+
+  @@map("products")
+}
+
+model Order {
+  id                      Int             @id @default(autoincrement())
+  customer_id             Int?
+  customer_type           CustomerType    @default(new)
+  channel                 SourceChannel?
+  payment_method          PaymentMethod   @default(wechat)
+  receivable_amount       Decimal         @default(0) @db.Decimal(10, 2)
+  paid_amount             Decimal         @default(0) @db.Decimal(10, 2)
+  discount_amount         Decimal         @default(0) @db.Decimal(10, 2)
+  refund_amount           Decimal         @default(0) @db.Decimal(10, 2)
+  notes                   String?         @db.Text
+  operation_status        OperationStatus @default(pending)
+  operation_date          DateTime?
+  expected_operation_date DateTime?
+  task_generated_status   TaskGenStatus   @default(pending)
+  lark_record_id          String?         @db.VarChar(50)
+
+  owner_id Int
+  owner    User @relation(fields: [owner_id], references: [id])
+  customer Customer? @relation(fields: [customer_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  order_items      OrderItem[]
+  followup_tasks   FollowupTask[]
+  prepaid_records  PrepaidRecord[]
+  operation_records OperationRecord[]
+
+  @@index([customer_id])
+  @@index([owner_id])
+  @@index([operation_date])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         Int     @id @default(autoincrement())
+  quantity   Int     @default(1)
+  unit_price Decimal @default(0) @db.Decimal(10, 2)
+  subtotal   Decimal @default(0) @db.Decimal(10, 2)
+
+  order_id   Int
+  product_id Int
+  order      Order   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [product_id], references: [id])
+
+  @@map("order_items")
+}
+
+model FollowupTask {
+  id                 Int             @id @default(autoincrement())
+  task_node          TaskNode
+  plan_date          DateTime?
+  actual_date        DateTime?
+  contact_method     FollowupMethod?
+  status             FollowupStatus  @default(pending)
+  ai_script          String?         @db.Text
+  customer_feedback  String?         @db.Text
+  customer_intent    CustomerIntent?
+  rating             Rating?
+  remarks            String?         @db.Text
+  lark_task_id       String?         @db.VarChar(50)
+  lark_record_id     String?         @db.VarChar(50)
+
+  order_id            Int
+  customer_id         Int
+  owner_id            Int
+  product_id          Int?
+  operation_record_id Int?
+  order               Order     @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  customer            Customer  @relation(fields: [customer_id], references: [id])
+  owner               User      @relation(fields: [owner_id], references: [id])
+  product             Product?  @relation(fields: [product_id], references: [id])
+  operation_record    OperationRecord? @relation(fields: [operation_record_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([owner_id])
+  @@index([plan_date])
+  @@index([status])
+  @@map("followup_tasks")
+}
+
+model OperationRecord {
+  id                     Int             @id @default(autoincrement())
+  operation_number       Int             @default(1)
+  operation_date         DateTime?
+  operation_status       OperationStatus @default(pending)
+  task_generated_status  TaskGenStatus   @default(pending)
+  notes                  String?         @db.Text
+  lark_record_id         String?         @db.VarChar(50)
+
+  customer_id Int
+  order_id    Int?
+  owner_id    Int
+  customer    Customer @relation(fields: [customer_id], references: [id])
+  order       Order?   @relation(fields: [order_id], references: [id])
+  owner       User     @relation(fields: [owner_id], references: [id])
+
+  followup_tasks FollowupTask[]
+
+  @@index([customer_id])
+  @@index([order_id])
+  @@map("operation_records")
+}
+
+model DailyReport {
+  id                   Int      @id @default(autoincrement())
+  date                 DateTime @db.Date
+  contact_count        Int      @default(0)
+  valid_contact_count  Int      @default(0)
+  new_customer_count   Int      @default(0)
+  deal_count           Int      @default(0)
+  deal_rate            Decimal? @db.Decimal(5, 4)
+  contact_efficiency   Decimal? @db.Decimal(5, 4)
+  summary              String?  @db.Text
+
+  owner_id Int
+  owner    User @relation(fields: [owner_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@unique([owner_id, date])
+  @@index([owner_id, date])
+  @@map("daily_reports")
+}
+
+model Target {
+  id           Int        @id @default(autoincrement())
+  target_type  TargetType
+  period_type  PeriodType
+  period_start DateTime   @db.Date
+  period_end   DateTime   @db.Date
+  target_value Decimal    @db.Decimal(10, 2)
+  notes        String?    @db.Text
+
+  owner_id Int
+  owner    User @relation(fields: [owner_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([owner_id, period_start])
+  @@map("targets")
+}
+
+model PrepaidRecord {
+  id             Int                  @id @default(autoincrement())
+  type           PrepaidType
+  amount         Decimal              @db.Decimal(10, 2)
+  balance        Decimal              @db.Decimal(10, 2)
+  payment_method PrepaidPaymentMethod?
+  notes          String?              @db.Text
+  date           DateTime?            @db.Date
+  lark_record_id String?              @db.VarChar(50)
+
+  customer_id Int
+  order_id    Int?
+  owner_id    Int?
+  customer    Customer @relation(fields: [customer_id], references: [id])
+  order       Order?   @relation(fields: [order_id], references: [id])
+  owner       User?    @relation(fields: [owner_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@map("prepaid_records")
+}
+
+model TransferLog {
+  id             Int            @id @default(autoincrement())
+  reason         TransferReason
+  lark_record_id String?        @db.VarChar(50)
+
+  customer_id    Int
+  from_owner_id  Int
+  to_owner_id    Int
+  operator_id    Int
+  customer       Customer @relation(fields: [customer_id], references: [id])
+  from_owner     User     @relation("FromOwner", fields: [from_owner_id], references: [id])
+  to_owner       User     @relation("ToOwner", fields: [to_owner_id], references: [id])
+  operator       User     @relation("Operator", fields: [operator_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@map("transfer_logs")
+}
+
+model ProductKnowledge {
+  id                     Int    @id @default(autoincrement())
+  ingredients            String? @db.Text
+  applicable_skin_types  Json?
+  contraindications      String? @db.Text
+  usage_notes            String? @db.Text
+  care_tips              String? @db.Text
+
+  product_id Int     @unique
+  product    Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("product_knowledge")
+}
+
+model SkinTip {
+  id             Int    @id @default(autoincrement())
+  condition_type String @db.VarChar(50)
+  title          String @db.VarChar(200)
+  content        String @db.Text
+  priority       Int    @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("skin_tips")
+}

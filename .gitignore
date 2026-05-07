@@ -10,6 +10,7 @@ package-lock.json
 # Temp JSON (from data migration scripts)
 *.json
 !package.json
+!tsconfig.json
 
 # Logs
 logs/
@@ -39,3 +40,6 @@ build/
 # Test
 coverage/
 .nyc_output/
+
+# Claude
+.claude/

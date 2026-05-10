@@ -1,9 +1,38 @@
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { authMiddleware } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { hashPassword, verifyPassword } from '../lib/password';
 
 const router = Router();
 router.use(authMiddleware);
+
+// ─── Multer config ─────────────────────────────────────────────
+const uploadsDir = path.resolve(__dirname, '../../uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadsDir),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = path.extname(file.originalname);
+    cb(null, `${unique}${ext}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = /\.(jpg|jpeg|png|gif|webp|bmp)$/i;
+    if (allowed.test(path.extname(file.originalname))) {
+      cb(null, true);
+    } else {
+      cb(new Error('仅支持 jpg/png/gif/webp/bmp 格式的图片'));
+    }
+  },
+});
 
 // GET /api/common/me - Current user info
 router.get('/me', (req: Request, res: Response) => {
@@ -16,6 +45,46 @@ router.get('/me', (req: Request, res: Response) => {
       larkOpenId: req.user!.larkOpenId,
     },
   });
+});
+
+// PUT /api/common/me/password - Change own password
+router.put('/me/password', async (req: Request, res: Response) => {
+  const { oldPassword, newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) {
+    res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: '新密码至少需要 6 位' } });
+    return;
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  if (!user) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '用户不存在' } });
+    return;
+  }
+
+  // Verify old password
+  if (user.password) {
+    if (!oldPassword) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: '请输入旧密码' } });
+      return;
+    }
+    if (!verifyPassword(oldPassword, user.password)) {
+      res.status(400).json({ success: false, error: { code: 'WRONG_PASSWORD', message: '旧密码错误' } });
+      return;
+    }
+  } else {
+    // User has no personal password, verify against dev password
+    const devPassword = process.env.DEV_LOGIN_PASSWORD || '123456';
+    if (!oldPassword || oldPassword !== devPassword) {
+      res.status(400).json({ success: false, error: { code: 'WRONG_PASSWORD', message: '旧密码错误' } });
+      return;
+    }
+  }
+
+  await prisma.user.update({
+    where: { id: req.user!.userId },
+    data: { password: hashPassword(newPassword) },
+  });
+  res.json({ success: true, data: null });
 });
 
 // ─── Customer asset card (aggregated from 6+ tables) ─────────────
@@ -208,6 +277,118 @@ router.get('/knowledge/skin-tips', async (req: Request, res: Response) => {
 router.get('/products', async (_req: Request, res: Response) => {
   const data = await prisma.product.findMany({ where: { status: 'on_sale' }, orderBy: { name: 'asc' } });
   res.json({ success: true, data });
+});
+
+// ─── Customer photos ──────────────────────────────────────────
+
+// POST /api/common/customers/:id/photos - Upload a photo
+router.post('/customers/:id/photos', (req: Request, res: Response, next) => {
+  upload.single('file')(req, res, (err: any) => {
+    if (err) {
+      if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+        res.status(400).json({ success: false, error: { code: 'FILE_TOO_LARGE', message: '文件大小不能超过 10MB' } });
+        return;
+      }
+      res.status(400).json({ success: false, error: { code: 'UPLOAD_ERROR', message: err.message || '文件上传失败' } });
+      return;
+    }
+    next();
+  });
+}, async (req: Request, res: Response) => {
+  const customerId = Number(req.params.id);
+  const isBoss = req.user!.role === 'boss';
+  const userId = req.user!.userId;
+
+  // Verify access to customer
+  const where: any = { id: customerId };
+  if (!isBoss) where.owner_id = userId;
+  const customer = await prisma.customer.findFirst({ where });
+  if (!customer) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '客户不存在' } }); return; }
+
+  if (!req.file) { res.status(400).json({ success: false, error: { code: 'NO_FILE', message: '请选择文件' } }); return; }
+
+  const url = `/uploads/${req.file.filename}`;
+  const photoType = req.body.type || 'other';
+
+  const photo = await prisma.customerPhoto.create({
+    data: {
+      customer_id: customerId,
+      url,
+      caption: req.body.caption || null,
+      type: photoType,
+    },
+  });
+
+  res.json({ success: true, data: photo });
+});
+
+// GET /api/common/customers/:id/photos - List all photos for a customer
+router.get('/customers/:id/photos', async (req: Request, res: Response) => {
+  const customerId = Number(req.params.id);
+  const isBoss = req.user!.role === 'boss';
+  const userId = req.user!.userId;
+
+  const where: any = { id: customerId };
+  if (!isBoss) where.owner_id = userId;
+  const customer = await prisma.customer.findFirst({ where });
+  if (!customer) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '客户不存在' } }); return; }
+
+  const photos = await prisma.customerPhoto.findMany({
+    where: { customer_id: customerId },
+    orderBy: { created_at: 'desc' },
+  });
+
+  res.json({ success: true, data: photos });
+});
+
+// PUT /api/common/customers/:id/photos/:photoId - Update photo caption/type
+router.put('/customers/:id/photos/:photoId', async (req: Request, res: Response) => {
+  const customerId = Number(req.params.id);
+  const photoId = Number(req.params.photoId);
+  const isBoss = req.user!.role === 'boss';
+  const userId = req.user!.userId;
+
+  const where: any = { id: customerId };
+  if (!isBoss) where.owner_id = userId;
+  const customer = await prisma.customer.findFirst({ where });
+  if (!customer) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '客户不存在' } }); return; }
+
+  const photo = await prisma.customerPhoto.findFirst({ where: { id: photoId, customer_id: customerId } });
+  if (!photo) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '照片不存在' } }); return; }
+
+  const updated = await prisma.customerPhoto.update({
+    where: { id: photoId },
+    data: {
+      caption: req.body.caption !== undefined ? req.body.caption : undefined,
+      type: req.body.type || undefined,
+    },
+  });
+
+  res.json({ success: true, data: updated });
+});
+
+// DELETE /api/common/customers/:id/photos/:photoId - Delete a photo
+router.delete('/customers/:id/photos/:photoId', async (req: Request, res: Response) => {
+  const customerId = Number(req.params.id);
+  const photoId = Number(req.params.photoId);
+  const isBoss = req.user!.role === 'boss';
+  const userId = req.user!.userId;
+
+  const where: any = { id: customerId };
+  if (!isBoss) where.owner_id = userId;
+  const customer = await prisma.customer.findFirst({ where });
+  if (!customer) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '客户不存在' } }); return; }
+
+  const photo = await prisma.customerPhoto.findFirst({ where: { id: photoId, customer_id: customerId } });
+  if (!photo) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '照片不存在' } }); return; }
+
+  // Delete file from disk
+  const filePath = path.resolve(__dirname, '../..', photo.url.replace(/^\//, ''));
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+  await prisma.customerPhoto.delete({ where: { id: photoId } });
+
+  res.json({ success: true, data: { deleted: true } });
 });
 
 export default router;

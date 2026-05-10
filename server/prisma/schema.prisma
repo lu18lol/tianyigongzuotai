@@ -165,6 +165,7 @@ model User {
   role          Role       @default(sales)
   status        UserStatus @default(active)
   lark_record_id String?   @db.VarChar(50)
+  password      String?   @db.VarChar(128)  // scrypt hashed, null=fallback to dev password
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -222,6 +223,7 @@ model Customer {
   prepaid_records   PrepaidRecord[]
   operation_records OperationRecord[]
   transfer_logs     TransferLog[]
+  photos            CustomerPhoto[]
 
   @@index([owner_id])
   @@index([status])
@@ -472,4 +474,18 @@ model SkinTip {
   updated_at DateTime @updatedAt
 
   @@map("skin_tips")
+}
+
+model CustomerPhoto {
+  id          Int      @id @default(autoincrement())
+  url         String   @db.Text
+  caption     String?  @db.VarChar(500)
+  type        String   @default("other") @db.VarChar(50) // before_surgery, after_surgery, skin_status, feedback, other
+  customer_id Int
+  customer    Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+
+  @@index([customer_id])
+  @@map("customer_photos")
 }

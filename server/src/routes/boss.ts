@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware, requireRole } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { hashPassword } from '../lib/password';
 
 const router = Router();
 router.use(authMiddleware, requireRole('boss'));
@@ -94,17 +95,12 @@ router.get('/targets/progress', async (req: Request, res: Response) => {
       actual = result._sum.contact_count || 0;
     }
     const targetValue = Number(t.target_value);
-    // Calculate period-adjusted target: for 'day' type, multiply by days; for 'week', multiply by weeks
-    const daysInPeriod = Math.ceil((new Date(t.period_end).getTime() - new Date(t.period_start).getTime()) / 86400000) + 1;
-    let periodTargetValue = targetValue;
-    if (t.period_type === 'day') periodTargetValue = targetValue * daysInPeriod;
-    else if (t.period_type === 'week') periodTargetValue = targetValue * Math.ceil(daysInPeriod / 7);
-    const progress = periodTargetValue > 0 ? Math.round(actual / periodTargetValue * 1000) / 10 : 0;
+    const progress = targetValue > 0 ? Math.round(actual / targetValue * 1000) / 10 : 0;
     return {
       ...t,
       owner_name: t.owner?.name,
       actual,
-      periodTargetValue,
+      periodTargetValue: targetValue,
       progress: Math.min(progress, 100),
     };
   }));
@@ -145,6 +141,19 @@ router.put('/users/:id', async (req: Request, res: Response) => {
 router.put('/users/:id/status', async (req: Request, res: Response) => {
   const u = await prisma.user.update({ where: { id: Number(req.params.id) }, data: { status: req.body.status } });
   res.json({ success: true, data: u });
+});
+
+router.put('/users/:id/password', async (req: Request, res: Response) => {
+  const { password } = req.body;
+  if (!password || password.length < 6) {
+    res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: '密码至少需要 6 位' } });
+    return;
+  }
+  await prisma.user.update({
+    where: { id: Number(req.params.id) },
+    data: { password: hashPassword(password) },
+  });
+  res.json({ success: true, data: null });
 });
 
 // ─── Customers ──────────────────────────────────────────────────
@@ -190,6 +199,50 @@ router.get('/customers/analytics', async (req: Request, res: Response) => {
   const totalRecharge = await prisma.customer.aggregate({ _sum: { total_recharge: true } });
   const totalBalance = await prisma.customer.aggregate({ _sum: { current_balance: true } });
 
+  // Channel distribution
+  const channels = await prisma.customer.groupBy({ by: ['source'], _count: true });
+  const channelDist = channels
+    .filter(c => c.source)
+    .map(c => ({ channel: c.source, count: c._count }))
+    .sort((a, b) => b.count - a.count);
+
+  // Monthly revenue trend (last 6 months)
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const recentOrders = await prisma.order.findMany({
+    where: { created_at: { gte: sixMonthsAgo } },
+    select: { paid_amount: true, created_at: true },
+  });
+  const monthlyRevenue: Record<string, number> = {};
+  for (const o of recentOrders) {
+    const month = o.created_at.toISOString().slice(0, 7); // YYYY-MM
+    monthlyRevenue[month] = (monthlyRevenue[month] || 0) + Number(o.paid_amount);
+  }
+  const revenueTrend = Object.entries(monthlyRevenue)
+    .map(([month, revenue]) => ({ month, revenue }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  // Owner performance
+  const ownerPerformance = await prisma.order.groupBy({
+    by: ['owner_id'],
+    where: { created_at: { gte: monthStart } },
+    _count: true,
+    _sum: { paid_amount: true },
+  });
+  const ownerIds = ownerPerformance.map(o => o.owner_id);
+  const ownerUsers = await prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true } });
+  const ownerMap: Record<number, string> = {};
+  for (const u of ownerUsers) ownerMap[u.id] = u.name;
+  const ownerPerf = ownerPerformance.map(o => ({
+    owner_name: ownerMap[o.owner_id] || '未知',
+    deals: o._count,
+    revenue: Number(o._sum.paid_amount || 0),
+  })).sort((a, b) => b.revenue - a.revenue);
+
+  // Customer type distribution (new vs old)
+  const customerTypes = await prisma.order.groupBy({ by: ['customer_type'], _count: true });
+  const typeDist = customerTypes.map(t => ({ type: t.customer_type, count: t._count }));
+
   res.json({
     success: true,
     data: {
@@ -199,6 +252,10 @@ router.get('/customers/analytics', async (req: Request, res: Response) => {
       status_distribution: statusDist,
       total_recharge: totalRecharge._sum.total_recharge || 0,
       total_balance: totalBalance._sum.current_balance || 0,
+      channel_distribution: channelDist,
+      revenue_trend: revenueTrend,
+      owner_performance: ownerPerf,
+      customer_type_distribution: typeDist,
       lost_warning: lostWarning.map(c => ({
         name: c.name,
         last_order_days: c.last_order_date ? Math.floor((now - new Date(c.last_order_date).getTime()) / (24*3600*1000)) : 999,
@@ -216,16 +273,19 @@ router.get('/operations', async (req: Request, res: Response) => {
   const data = await prisma.operationRecord.findMany({
     where,
     include: {
-      customer: { select: { name: true } },
+      customer: { select: { id: true, name: true } },
       owner: { select: { name: true } },
+      order: { select: { order_items: { include: { product: { select: { name: true } } } } } },
     },
     orderBy: { operation_date: 'desc' },
     take: 100,
   });
   res.json({ success: true, data: data.map(o => ({
     ...o,
+    customer_id: o.customer?.id,
     customer_name: o.customer?.name,
     owner_name: o.owner?.name,
+    products: o.order?.order_items?.map(i => i.product?.name).filter(Boolean) || [],
   })) });
 });
 
@@ -407,7 +467,7 @@ router.get('/search/orders', async (req: Request, res: Response) => {
       ],
     },
     include: {
-      customer: { select: { name: true } },
+      customer: { select: { id: true, name: true } },
       owner: { select: { name: true } },
       order_items: { include: { product: { select: { name: true } } } },
     },
@@ -416,6 +476,7 @@ router.get('/search/orders', async (req: Request, res: Response) => {
   });
   res.json({ success: true, data: data.map(o => ({
     ...o,
+    customer_id: o.customer?.id,
     customer_name: o.customer?.name,
     owner_name: o.owner?.name,
     product_name: o.order_items[0]?.product?.name || '',

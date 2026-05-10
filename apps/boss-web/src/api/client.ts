@@ -63,7 +63,7 @@ export interface Order {
 }
 export interface FollowupTask {
   id: number; order_id: number; customer_id: number; customer_name?: string;
-  product_name?: string; task_node: string; plan_date: string; actual_date?: string;
+  owner_name?: string; product_name?: string; task_node: string; plan_date: string; actual_date?: string;
   contact_method?: string; status: string; ai_script?: string;
   customer_feedback?: string; customer_intent?: string; rating?: string;
   remarks?: string; operation_record_id?: number;
@@ -81,6 +81,11 @@ export interface TransferLog {
   operator_name?: string; reason: string; created_at: string;
 }
 export interface SkinTip { id: number; condition_type: string; title: string; content: string; priority: number; }
+export interface CustomerPhoto {
+  id: number; customer_id: number; url: string; caption?: string;
+  type: string; // before_surgery, after_surgery, skin_status, feedback, other
+  created_at: string;
+}
 export interface AssetCardData {
   customer: Customer; orders: Order[]; followups: FollowupTask[];
   operations: OperationRecord[]; prepaid: { total_recharge: number; total_deduct: number; balance: number; records: PrepaidRecord[] };
@@ -102,6 +107,8 @@ export function getUsers() { return api.get('/boss/users'); }
 export function createUser(data: { name: string; phone?: string; role?: string }) { return api.post('/boss/users', data); }
 export function updateUser(id: number, data: { name?: string; phone?: string; role?: string }) { return api.put(`/boss/users/${id}`, data); }
 export function updateUserStatus(id: number, status: string) { return api.put(`/boss/users/${id}/status`, { status }); }
+export function updateUserPassword(id: number, password: string) { return api.put(`/boss/users/${id}/password`, { password }); }
+export function changeMyPassword(oldPassword: string, newPassword: string) { return api.put('/common/me/password', { oldPassword, newPassword }); }
 export function transferCustomers(data: { from_owner_id: number; to_owner_id: number }) { return api.post('/boss/customers/transfer', data); }
 export function getCustomerAnalytics(params?: any) { return api.get('/boss/customers/analytics', params); }
 export function getTargets(params?: any) { return api.get('/boss/targets', params); }
@@ -139,3 +146,22 @@ export function updateOperation(id: number, data: any) { return api.put(`/sales/
 export function getMyReports(params?: any) { return api.get('/sales/reports/daily', params); }
 export function submitReport(data: any) { return api.post('/sales/reports/daily', data); }
 export function getMyTargets() { return api.get('/sales/targets/my'); }
+
+// ─── Customer Photos ────────────────────────────────────────────
+export function getCustomerPhotos(customerId: number) { return api.get(`/common/customers/${customerId}/photos`); }
+export function uploadCustomerPhoto(customerId: number, file: File, caption?: string, type?: string) {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (caption) formData.append('caption', caption);
+  if (type) formData.append('type', type);
+  const token = localStorage.getItem('access_token');
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(`/api/common/customers/${customerId}/photos`, { method: 'POST', headers, body: formData }).then(r => r.json());
+}
+export function updatePhotoCaption(customerId: number, photoId: number, data: { caption?: string; type?: string }) {
+  return api.put(`/common/customers/${customerId}/photos/${photoId}`, data);
+}
+export function deleteCustomerPhoto(customerId: number, photoId: number) {
+  return api.del(`/common/customers/${customerId}/photos/${photoId}`);
+}

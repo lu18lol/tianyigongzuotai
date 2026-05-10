@@ -2,6 +2,7 @@ import axios from 'axios';
 import logger from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { signToken, signRefreshToken, verifyRefreshToken } from '../lib/jwt';
+import { verifyPassword } from '../lib/password';
 
 interface FeishuTokenResponse {
   access_token: string;
@@ -161,11 +162,6 @@ export class AuthService {
       throw new Error('Dev login is not enabled');
     }
 
-    const devPassword = process.env.DEV_LOGIN_PASSWORD || '123456';
-    if (password !== devPassword) {
-      throw new Error('密码错误');
-    }
-
     const user = await prisma.user.findFirst({
       where: { name },
     });
@@ -176,6 +172,18 @@ export class AuthService {
 
     if (user.status !== 'active') {
       throw new Error('该账号已被禁用');
+    }
+
+    // If user has a personal password, verify it; otherwise fall back to shared dev password
+    if (user.password) {
+      if (!verifyPassword(password, user.password)) {
+        throw new Error('密码错误');
+      }
+    } else {
+      const devPassword = process.env.DEV_LOGIN_PASSWORD || '123456';
+      if (password !== devPassword) {
+        throw new Error('密码错误');
+      }
     }
 
     const tokens = this.generateTokens({
